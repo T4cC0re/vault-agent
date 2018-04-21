@@ -2,12 +2,9 @@ package main
 
 import (
 	"fmt"
-	"net"
-
 	"errors"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
-	"os"
 )
 
 var E_UNSUPPORTED = errors.New("unsupported action")
@@ -16,29 +13,15 @@ var E_NOT_IMPLEMENTED = errors.New("not implemented, yet/work in progress")
 type Agent struct {
 	vaultToken string
 	keys []*agent.Key
+	api VaultAPI
 }
 
-func newAgent(sockPath string, vaultToken string) error {
+func newAgent(vaultAddr string, vaultToken string) (Agent, error) {
+	api := NewVaultAPI(vaultAddr, vaultToken)
 
-	fmt.Fprintf(os.Stderr, "Starting agent at '%s' with token '%s'\n", sockPath, vaultToken)
+	ag := Agent{vaultToken:vaultToken, api: *api}
 
-	l, err := net.Listen("unix", sockPath)
-	if err != nil {
-		return err
-	}
-
-	ag := Agent{}
-
-	for {
-		conn, err := l.Accept()
-		if err != nil {
-			// handle error
-			continue
-		}
-		agent.ServeAgent(&ag, conn)
-	}
-
-	return nil
+	return ag, nil
 }
 
 // List returns the identities known to the agent.
@@ -60,8 +43,19 @@ func (this *Agent) List() ([]*agent.Key, error) {
 // Sign has the agent sign the data using a protocol 2 key as defined
 // in [PROTOCOL.agent] section 2.6.2.
 func (this *Agent) Sign(key ssh.PublicKey, data []byte) (*ssh.Signature, error) {
-	fmt.Println("Sign", key, data)
-	return nil, E_NOT_IMPLEMENTED
+	fmt.Println("Signature requested:", key)
+
+	blob, err := this.api.Sign("ssh-agent", 512, data)
+	if err != nil {
+		fmt.Sprintf("Error: %v", err)
+		return nil, err
+	}
+
+	fmt.Printf("Signature:\n - Length .: %d\n - Content : %x\n", len(blob), blob)
+
+	sig := ssh.Signature{Blob:blob,Format:"rsa-sha2-512"}
+
+	return &sig, nil
 }
 
 // Add adds a private key to the agent.
@@ -79,24 +73,24 @@ func (this *Agent) Remove(key ssh.PublicKey) error {
 
 // RemoveAll removes all identities.
 func (this *Agent) RemoveAll() error {
-	fmt.Println("Removeall")
+	fmt.Println("RemoveAll")
 	return E_UNSUPPORTED
 }
 
 // Lock locks the agent. Sign and Remove will fail, and List will empty an empty list.
 func (this *Agent) Lock(passphrase []byte) error {
-	fmt.Println("lock", passphrase)
+	fmt.Println("Lock", passphrase)
 	return E_NOT_IMPLEMENTED
 }
 
 // Unlock undoes the effect of Lock
 func (this *Agent) Unlock(passphrase []byte) error {
-	fmt.Println("unlock", passphrase)
+	fmt.Println("Unlock", passphrase)
 	return E_NOT_IMPLEMENTED
 }
 
 // Signers returns signers for all the known keys.
 func (this *Agent) Signers() ([]ssh.Signer, error) {
-	fmt.Println("signers")
+	fmt.Println("Signers")
 	return []ssh.Signer{}, E_UNSUPPORTED
 }

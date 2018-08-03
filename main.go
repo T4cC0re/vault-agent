@@ -10,9 +10,12 @@ import (
 	"os"
 	"os/exec"
 	"syscall"
+	"errors"
+	"flag"
+	"runtime"
 )
 
-var E_MEMLOCK = errors.New("failed to lock memory:\nTry executing with --no-mlock or set capability with: setcap cap_ipc_lock=+ep /path/to/vault-agent")
+var E_MEMLOCK = errors.New("failed to lock memory:\nTry executing with --no-mlockall or set capability with: setcap cap_ipc_lock=+ep /path/to/vault-agent")
 
 func main() {
 	var file *os.File
@@ -24,7 +27,6 @@ func main() {
 
 	// Reexec in background
 	if os.Getppid() != 1 && !*foreground {
-		// I am the parent
 		binary, err := exec.LookPath(os.Args[0])
 		if err != nil {
 			log.Fatalln(err)
@@ -38,16 +40,16 @@ func main() {
 	}
 
 	// I am the child
-	if !*noMlockall {
+
+	if *noMlockall || runtime.GOOS == "darwin" {
+		log.Println("mlockall syscall usage disabled by flag or OS!")
+	} else {
 		// Lock memory pages in child, too
 		err := syscall.Mlockall(syscall.MCL_FUTURE | syscall.MCL_CURRENT)
 		if err != nil {
 			log.Fatalln(E_MEMLOCK)
 		}
-	} else {
-		log.Println("mlockall syscal usage disabled!")
 	}
-
 	// daemon business logic starts here
 
 	vaultAddr := os.Getenv("VAULT_ADDR")
@@ -75,6 +77,8 @@ func main() {
 			log.Fatalln(err)
 		}
 
+	func () {
+		// Disassociate std{in,out,err}
 		file, err = os.OpenFile("/dev/null", os.O_RDWR, 0)
 		if err != nil {
 			log.Fatalln(err)
@@ -83,7 +87,7 @@ func main() {
 		syscall.Dup2(int(file.Fd()), int(os.Stderr.Fd()))
 		syscall.Dup2(int(file.Fd()), int(os.Stdout.Fd()))
 		syscall.Dup2(int(file.Fd()), int(os.Stdin.Fd()))
-	}
+	}()
 
 	for {
 		conn, err := l.Accept()
